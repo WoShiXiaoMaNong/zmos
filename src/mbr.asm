@@ -1,3 +1,6 @@
+        sys_base_addr equ 0x00040000
+        sys_start_sector equ 0x00000001
+
 	mov ax,cs
 	mov ds,ax
 	
@@ -26,34 +29,94 @@
     mov dword [ebx+0x20],0x80007fff    ;基地址为0x000B8000，界限0x07FFF 
     mov dword [ebx+0x24],0x0040920b    ;粒度为字节	size
 
-	mov word [cs:pgdt + 0x7c00],8 * 5 -1
+    mov word [cs:pgdt + 0x7c00],8 * 5 -1
 	
-	lgdt [cs:0x7c00 + pgdt]
+    lgdt [cs:0x7c00 + pgdt]
     in al,0x92                         ;南桥芯片内的端口 
     or al,0000_0010B
     out 0x92,al                        ;打开A20
-	cli
-	mov eax,cr0
-	or eax,0x01
-	mov cr0,eax	
-	jmp  dword 0x10:flush
-	
-	[bits 32]
-	
-	
+    cli
+    mov eax,cr0
+    or eax,0x01
+    mov cr0,eax	
+    jmp  dword 0x10:flush
+[bits 32]
 flush:
-	mov eax,0x20
-	mov es,eax
-	mov al,'a'
-	mov [es:200],al
-	
-	hlt
+	mov eax,0x08
+        mov ds,eax
+        
+        mov eax,0x0018
+        mov ss,eax
+        xor esp,esp
+        
+        mov edi,sys_base_addr
+        mov eax,sys_start_sector
+        mov ebx,edi
+        call read_hard_disk_0
+       
+        jmp [edi]
+    
+
+;从硬盘读取一个扇区，eax=扇区号
+;数据存放在ds:ebx
+read_hard_disk_0:
+         push eax 
+         push ecx
+         push edx
+      
+         push eax
+         
+         mov dx,0x1f2
+         mov al,1
+         out dx,al                       ;读取的扇区数
+
+         inc dx                          ;0x1f3
+         pop eax
+         out dx,al                       ;LBA地址7~0
+
+         inc dx                          ;0x1f4
+         mov cl,8
+         shr eax,cl
+         out dx,al                       ;LBA地址15~8
+
+         inc dx                          ;0x1f5
+         shr eax,cl
+         out dx,al                       ;LBA地址23~16
+
+         inc dx                          ;0x1f6
+         shr eax,cl
+         or al,0xe0                      ;第一硬盘  LBA地址27~24
+         out dx,al
+
+         inc dx                          ;0x1f7
+         mov al,0x20                     ;读命令
+         out dx,al
+
+  .waits:
+         in al,dx
+         and al,0x88
+         cmp al,0x08
+         jnz .waits                      ;不忙，且硬盘已准备好数据传输 
+
+         mov ecx,256                     ;总共要读取的字数
+         mov dx,0x1f0
+  .readw:
+         in ax,dx
+         mov [ebx],ax
+         add ebx,2
+         loop .readw
+
+         pop edx
+         pop ecx
+         pop eax
+      
+         ret
 	
 	
 	
 	
 	pgdt:
-		dw		0				;GDT size - 1
+		dw		0		;GDT size - 1
 		dd 		0x00007e00      ;GDT的物理地址
 		
 
